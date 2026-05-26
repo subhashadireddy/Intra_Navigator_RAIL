@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Railway Indoor Navigation</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <!-- Google Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@800;900&display=swap"
+        rel="stylesheet">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <div class="main-wrapper">
+        <div class="container">
+            <header>
+                <h1>Railway Indoor Navigation</h1>
+                <div class="language-switcher" id="language-switcher">
+                    <button class="lang-btn active" data-lang="en">English</button>
+                    <button class="lang-btn" data-lang="te">తెలుగు</button>
+                    <button class="lang-btn" data-lang="hi">हिंदी</button>
+                </div>
+            </header>
+
+            <div class="control-panel">
+                <div class="input-group">
+                    <label for="startPlatform">Source Platform</label>
+                    <select id="startPlatform">
+                        <option value="" disabled selected>Platform...</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="startPosition">Your Position</label>
+                    <select id="startPosition">
+                        <option value="" disabled selected>Nearest FOB...</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="endNode">Destination Gate</label>
+                    <select id="endNode">
+                        <option value="" disabled selected>Gate...</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="resourcePref">Prefer Resource</label>
+                    <select id="resourcePref">
+                        <option value="none">Best Path</option>
+                        <option value="stairs">Stairs</option>
+                        <option value="ramps">Ramps (Accessible)</option>
+                        <option value="lifts">Lifts / Elevators</option>
+                        <option value="escalators">Escalators</option>
+                    </select>
+                </div>
+
+                <button id="navigateBtn" disabled>Find Route</button>
+            </div>
+
+            <div class="layout-container">
+                <div class="main-content">
+                    <div id="map-container">
+                        <div id="map"></div>
+
+                        <!-- Floating Hold to Move Button -->
+                        <div id="movement-btn-container">
+                            <button id="hold-to-move-btn" disabled>PRESS & HOLD TO MOVE</button>
+                        </div>
+
+                        <!-- Full Map View Floating Button -->
+                        <button id="full-map-btn" class="full-map-btn" title="Open Station Overview Map">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+                            Full Map View
+                        </button>
+                    </div>
+
+                    <div id="directions-panel">
+                        <!-- Instructions rendered here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <!-- Modules in dependency order -->
+    <script src="graph/nodes.js"></script>
+    <script src="graph/graph.js"></script>
+    <script src="graph/pathfinding.js"></script>
+
+    <script src="instructions/templates.js"></script>
+    <script src="instructions/translations.js"></script>
+    <script src="instructions/generator.js"></script>
+
+    <script src="ui/map.js"></script>
+    <script src="ui/directionsPanel.js"></script>
+    <script src="ui/movementController.js"></script>
+
+    <script src="animation/introAnimation.js"></script>
+    <script src="animation/routeAnimator.js"></script>
+    <script src="ui/fullMapViewer.js"></script>
+
+    <!-- Main Initialization -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            populateDropdowns();
+            initCustomDropdowns();
+            initLanguageSwitcher();
+
+            // Bind navigate button
+            document.getElementById('navigateBtn').addEventListener('click', () => {
+                const startNode = getSourceNode();
+                const endNode = endSelect.value ? gateMap[endSelect.value] : null;
+                const resPref = resourcePrefSel.value;
+
+                if (!startNode || !endNode) return;
+
+                const path = aStar(startNode, endNode, resPref);
+                if (path) {
+                    // Generate UI Instructions
+                    generateInstructions(path, currentLanguage);
+                    updateDirectionsUI();
+
+                    // Draw and Animate
+                    drawPath(path);
+
+                    // Call the new animator with path nodes for syncing
+                    const fullLatLngs = path.map(id => getLatLng(id));
+                    // Delay animation start until bounds are updated
+                    setTimeout(() => {
+                        animateMarker(fullLatLngs, path);
+                    }, 1500);
+                }
+                else {
+                    alert("No routing path accessible.");
+                }
+            });
+        });
+
+        function populateDropdowns() {
+            for (let p = 1; p <= 8; p++) {
+                const opt = document.createElement('option'); opt.value = p; opt.textContent = `Platform ${p}`;
+                startSel.appendChild(opt);
+            }
+
+            const positions = ["FOB1", "FOB2", "FOB3"];
+            for (const pos of positions) {
+                const opt = document.createElement('option'); opt.value = pos; opt.textContent = `Near ${fobNames[pos]}`;
+                posSel.appendChild(opt);
+            }
+
+            const gList = ['G1', 'G2', 'G3', 'G4', 'G5'];
+            for (const g of gList) {
+                const opt = document.createElement('option'); opt.value = g; opt.textContent = `Gate ${g.substring(1)}`;
+                endSelect.appendChild(opt);
+            }
+
+            startSel.addEventListener('change', updateState);
+            posSel.addEventListener('change', updateState);
+            endSelect.addEventListener('change', updateState);
+        }
+
+        function initCustomDropdowns() {
+            const selects = document.querySelectorAll('select');
+            selects.forEach(select => {
+                const container = document.createElement('div');
+                container.className = 'custom-dropdown';
+
+                const header = document.createElement('div');
+                header.className = 'dropdown-header';
+                header.textContent = select.options[select.selectedIndex].textContent;
+
+                const list = document.createElement('div');
+                list.className = 'dropdown-list';
+
+                Array.from(select.options).forEach((option, index) => {
+                    const item = document.createElement('div');
+                    item.className = 'dropdown-item';
+                    item.textContent = option.textContent;
+                    item.dataset.value = option.value;
+                    item.dataset.index = index;
+
+                    item.addEventListener('click', () => {
+                        select.selectedIndex = index;
+                        header.textContent = option.textContent;
+                        select.dispatchEvent(new Event('change'));
+                        // Ensure button state is updated based on validity of both Source and Dest
+                    });
+                    list.appendChild(item);
+                });
+
+                container.appendChild(header);
+                container.appendChild(list);
+                select.parentNode.insertBefore(container, select);
+            });
+        }
+
+        function initLanguageSwitcher() {
+            const btns = document.querySelectorAll('.lang-btn');
+            btns.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    btns.forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    const lang = e.target.getAttribute('data-lang');
+                    setLanguage(lang);
+
+                    // Re-generate instructions if path exists
+                    const startNode = getSourceNode();
+                    const endNode = endSelect.value ? gateMap[endSelect.value] : null;
+                    if (startNode && endNode && currentInstructions.length > 0) {
+                        const resPref = resourcePrefSel.value;
+                        const path = aStar(startNode, endNode, resPref);
+                        if (path) {
+                            generateInstructions(path, lang);
+                            updateDirectionsUI();
+                        }
+                    }
+                });
+            });
+        }
+
+        function getSourceNode() {
+            const p = startSel.value;
+            const pos = posSel.value;
+            if (p && pos) return `${platformMap[p]}_${fobMap[pos]}`;
+            return null;
+        }
+
+        function updateState() {
+            const startNode = getSourceNode();
+            const endNode = endSelect.value ? gateMap[endSelect.value] : null;
+
+            navigateBtn.disabled = !(startNode && endNode);
+
+            pathLayer.clearLayers(); animationLayer.clearLayers();
+            if (typeof animationTimer !== 'undefined' && animationTimer) cancelAnimationFrame(animationTimer);
+            document.getElementById('directions-panel').style.display = 'none';
+
+            placePins(startNode, endNode);
+        }
+    </script>
+
+    <!-- Fullscreen SVG Map Viewer Modal -->
+    <div id="full-map-modal" class="full-map-modal">
+        <button id="full-map-close" class="full-map-close" title="Close Modal">&times;</button>
+        <div id="svg-viewer-content" class="svg-viewer-content">
+            <!-- Dynamically Loaded SVG is injected here -->
+        </div>
+        <!-- Floating Zoom HUD Controls -->
+        <div class="fm-zoom-hud">
+            <button id="fm-zoom-in" title="Zoom In">+</button>
+            <button id="fm-zoom-out" title="Zoom Out">&minus;</button>
+            <button id="fm-zoom-reset" title="Reset Fit">↺</button>
+        </div>
+    </div>
+</body>
+
+</html>
