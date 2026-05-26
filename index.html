@@ -184,6 +184,18 @@
                 const list = document.createElement('div');
                 list.className = 'dropdown-list';
 
+                // Allow clicking the header to toggle dropdown open state
+                header.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    // Close other dropdowns first
+                    document.querySelectorAll('.custom-dropdown').forEach(dropdown => {
+                        if (dropdown !== container) {
+                            dropdown.classList.remove('open');
+                        }
+                    });
+                    container.classList.toggle('open');
+                });
+
                 Array.from(select.options).forEach((option, index) => {
                     const item = document.createElement('div');
                     item.className = 'dropdown-item';
@@ -191,11 +203,12 @@
                     item.dataset.value = option.value;
                     item.dataset.index = index;
 
-                    item.addEventListener('click', () => {
+                    item.addEventListener('click', (e) => {
+                        e.stopPropagation();
                         select.selectedIndex = index;
                         header.textContent = option.textContent;
                         select.dispatchEvent(new Event('change'));
-                        // Ensure button state is updated based on validity of both Source and Dest
+                        container.classList.remove('open');
                     });
                     list.appendChild(item);
                 });
@@ -203,6 +216,13 @@
                 container.appendChild(header);
                 container.appendChild(list);
                 select.parentNode.insertBefore(container, select);
+            });
+
+            // Click outside a dropdown to close it
+            document.addEventListener('click', () => {
+                document.querySelectorAll('.custom-dropdown').forEach(dropdown => {
+                    dropdown.classList.remove('open');
+                });
             });
         }
 
